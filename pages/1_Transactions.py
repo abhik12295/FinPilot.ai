@@ -1,3 +1,5 @@
+import keyword
+
 import pandas as pd
 import streamlit as st
 
@@ -61,6 +63,14 @@ def update_transaction_category(transaction_id: str, new_category: str):
         .eq("user_id", user_id)
         .execute()
     )
+
+def save_category_rule(keyword:str, category:str):
+    payload = {
+        "user_id": user_id,
+        "keyword": keyword.lower().strip(),
+        "category": category
+    }
+    return supabase.table("category_rules").upsert(payload, on_conflict="user_id,keyword").execute()
 
 
 transactions_df = load_transactions(user_id)
@@ -183,11 +193,23 @@ new_category = st.selectbox(
     index=CATEGORIES.index(current_category) if current_category in CATEGORIES else CATEGORIES.index("Uncategorized")
 )
 
+learn_rule = st.checkbox("Remember this merchant/category rule for future uploads")
 if st.button("Update Category"):
     try:
         update_transaction_category(selected_transaction_id, new_category)
-        st.cache_data.clear()
-        st.success("Category updated successfully.")
-        st.rerun()
+        if learn_rule:
+            selected_row =  display_df[display_df["id"] == selected_transaction_id]
+            keyword = selected_row["merchant"]
+
+            if keyword:
+                save_category_rule(keyword, new_category)
+            
+            st.cache_data.clear()
+            st.success("Category updated successfully.")
+            st.rerun()
+    
     except Exception as e:
         st.error(f"Failed to update category: {e}")
+        
+
+    

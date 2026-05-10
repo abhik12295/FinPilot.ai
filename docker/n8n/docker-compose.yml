@@ -1,0 +1,33 @@
+version: "3.8"
+
+services:
+  n8n:
+    image: docker.n8n.io/n8nio/n8n
+    container_name: finpilot-n8n
+    ports:
+      - "5678:5678"
+
+    environment:
+      - GENERIC_TIMEZONE=America/Chicago
+      - TZ=America/Chicago
+
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=admin
+      - N8N_BASIC_AUTH_PASSWORD=admin123
+
+      - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
+      - N8N_RUNNERS_ENABLED=true
+      # FinPilot env
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_SECRET_KEY=${SUPABASE_SECRET_KEY}
+      - SIMPLEFIN_ACCOUNTS_URL=${SIMPLEFIN_ACCOUNTS_URL}
+      - FINPILOT_USER_ID=${FINPILOT_USER_ID}
+
+    volumes:
+      - n8n_data:/home/node/.n8n
+
+    restart: unless-stopped
+ 
+
+volumes:
+  n8n_data:
