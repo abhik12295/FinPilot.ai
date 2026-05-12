@@ -1,10 +1,11 @@
 import hashlib
 from datetime import datetime
+from unicodedata import category
 from httpx import get
 import pandas as pd
 import streamlit as st
 from lib.auth import require_auth, logout_button
-from lib.categorizer import categorize_transaction
+from lib.categorizer import categorize_transaction_smart
 from lib.supabase_client import get_authenticated_supabase_client
 
 st.set_page_config(
@@ -80,12 +81,40 @@ def normalize_csv(df:pd.DataFrame) -> pd.DataFrame:
     df['description'] = df['description'].astype(str).str.strip()
     df['merchant'] = df['merchant'].fillna(df['description']).astype(str).str.strip()
 
-    df['category'] = df.apply(
-        lambda row: row['category']
-        if pd.notna(row['category']) and str(row['category']).strip()
-        else categorize_transaction(row['description'], row['merchant'], category_rules),
-        axis=1
-    )
+    # df['category'] = df.apply(
+    #     lambda row: row['category']
+    #     if pd.notna(row['category']) and str(row['category']).strip()
+    #     else categorize_transaction_smart(row['description'], row['merchant'], category_rules),
+    #     axis=1
+    # )
+
+    # category_results = df.apply(
+    #     lambda row: categorize_transaction_smart(
+    #         description=row['description'],
+    #         merchant=row['merchant'],
+    #         amount=row['amount'],
+    #         user_rules=category_rules,
+    #     ),
+    #     axis=1
+    # )
+    category_results = [categorize_transaction_smart(
+            description=row['description'],
+            merchant=row['merchant'],
+            amount=row['amount'],
+            user_rules=category_rules,
+        )
+        for _, row in df.iterrows()
+    ]
+
+    df['category'] = [
+        row["category"] if pd.notna(row["category"]) and str(row["category"]).strip()
+        else result.category
+        for (_, row), result in zip(df.iterrows(), category_results)
+    ]
+
+    df["category_confidence"] = [result.confidence for result in category_results]
+    df["category_reason"] = [result.reason for result in category_results]
+    df["needs_review"] = df["category_confidence"] < 0.75
 
     df['pending'] = df['pending'].astype(bool)
     return df
@@ -108,7 +137,10 @@ def insert_transactions(df: pd.DataFrame, account_id: str):
             "pending": bool(row["pending"]),
             "raw_data": {
                 "source": "csv_upload",
-                "uploaded_at": datetime.utcnow().isoformat()
+                "uploaded_at": datetime.utcnow().isoformat(),
+                "category_confidence" : float(row.get("category_confidence", 0.0)),
+                "category_reason" : str(row.get("category_reason", "")),
+                "needs_review" : bool(row.get("needs_review", False)),
             }
         })
 
@@ -156,16 +188,18 @@ if uploaded_file:
 
         st.subheader("Preview")
         st.dataframe(
-            normalized_df[["date", "merchant", "description", "amount", "category", "pending"]],
+            normalized_df[["date", "merchant", "description", "amount", "category", 
+                           "category_confidence", "category_reason", "needs_review", "pending"]],
             use_container_width=True,
             hide_index=True
         )
 
-        c1, c2, c3 = st.columns(3)
+        c1, c2, c3, c4 = st.columns(4)
 
         c1.metric("Rows Ready", len(normalized_df))
         c2.metric("Total Income", f"${normalized_df[normalized_df['amount'] > 0]['amount'].sum():,.2f}")
         c3.metric("Total Spending", f"${normalized_df[normalized_df['amount'] < 0]['amount'].abs().sum():,.2f}")
+        c4.metric("Needs Review", f"{normalized_df['needs_review'].sum()}")
 
         if st.button("Save Transactions to Supabase"):
             if normalized_df.empty:
